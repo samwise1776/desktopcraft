@@ -37,7 +37,12 @@ def main() -> None:
     BUILD.mkdir(parents=True)
     DOWNLOADS.mkdir(parents=True, exist_ok=True)
 
-    run("javac", "--release", "17", "-d", str(BUILD), str(SOURCE))
+    if shutil.which("javac"):
+        run("javac", "--release", "17", "-d", str(BUILD), str(SOURCE))
+    else:
+        # Some minimal Java installations include the compiler module but omit
+        # the javac launcher binary. Invoke the same compiler through java.
+        run("java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "--release", "17", "-d", str(BUILD), str(SOURCE))
     run(
         "jar", "--create", "--file", str(JAR), "--main-class", "DesktopcraftApp",
         "-C", str(BUILD), ".", "lessons-extra.js", "desktop-courses.js",

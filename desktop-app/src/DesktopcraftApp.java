@@ -9,6 +9,10 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -251,6 +255,14 @@ public class DesktopcraftApp {
         customization.addActionListener(event -> showCustomizationDialog());
         JButton leaderboard = darkButton("🏆  Leaderboard");
         leaderboard.addActionListener(event -> showLeaderboard());
+        JButton projects = darkButton("▤  Projects");
+        projects.addActionListener(event -> showProjectsDialog());
+        JButton community = darkButton("⬇  Community apps");
+        community.addActionListener(event -> showCommunityDialog());
+        JButton feedback = darkButton("✉  Feedback");
+        feedback.addActionListener(event -> showFeedbackDialog());
+        JButton about = darkButton("ⓘ  About Desktopcraft");
+        about.addActionListener(event -> showAboutDialog());
         JButton reset = darkButton("Reset current course");
         reset.addActionListener(event -> resetCourse());
         bottom.add(createLessonButton);
@@ -260,8 +272,18 @@ public class DesktopcraftApp {
         bottom.add(helper);
         bottom.add(customization);
         bottom.add(leaderboard);
+        bottom.add(projects);
+        bottom.add(community);
+        bottom.add(feedback);
+        bottom.add(about);
         bottom.add(reset);
-        sidebar.add(bottom, BorderLayout.SOUTH);
+        JScrollPane toolScroll = new JScrollPane(bottom);
+        toolScroll.setPreferredSize(new Dimension(0, 315));
+        toolScroll.setBorder(null);
+        toolScroll.getViewport().setBackground(NAV);
+        toolScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        toolScroll.getVerticalScrollBar().setUnitIncrement(14);
+        sidebar.add(toolScroll, BorderLayout.SOUTH);
         return sidebar;
     }
 
@@ -1317,6 +1339,211 @@ public class DesktopcraftApp {
             if (parts.length == 4) replies.add(new ForumReply(decodeField(parts[0]), decodeField(parts[1]), decodeField(parts[3]), Long.parseLong(parts[2])));
         }
         return new ForumTopic(Long.parseLong(fields[0]), decodeField(fields[1]), decodeField(fields[2]), decodeField(fields[3]), decodeField(fields[4]), decodeField(fields[5]), decodeField(fields[6]), likes, replies);
+    }
+
+    private void showProjectsDialog() {
+        JDialog dialog = new JDialog(frame, "Desktopcraft Projects", true);
+        dialog.setIconImages(buildAppIcons());
+        dialog.setSize(1050, 720);
+        dialog.setLocationRelativeTo(frame);
+
+        DefaultListModel<Path> files = new DefaultListModel<>();
+        JList<Path> fileList = new JList<>(files);
+        fileList.setCellRenderer(new DefaultListCellRenderer() {
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean selected, boolean focused) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, selected, focused);
+                if (value instanceof Path path) label.setText(path.getFileName().toString());
+                return label;
+            }
+        });
+        JTextArea projectEditor = new JTextArea();
+        projectEditor.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
+        projectEditor.setTabSize(4);
+        JLabel pathLabel = new JLabel("Choose a source file to begin");
+        pathLabel.setBorder(new EmptyBorder(8, 10, 8, 10));
+        final Path[] activeFile = {null};
+        final String[] savedCopy = {""};
+
+        Runnable loadSelected = () -> {
+            Path selected = fileList.getSelectedValue();
+            if (selected == null) return;
+            try {
+                activeFile[0] = selected;
+                savedCopy[0] = Files.readString(selected, StandardCharsets.UTF_8);
+                projectEditor.setText(savedCopy[0]);
+                projectEditor.setCaretPosition(0);
+                pathLabel.setText(selected.toAbsolutePath().toString());
+            } catch (IOException exception) {
+                JOptionPane.showMessageDialog(dialog, exception.getMessage(), "Could not open file", JOptionPane.ERROR_MESSAGE);
+            }
+        };
+        fileList.addListSelectionListener(event -> { if (!event.getValueIsAdjusting()) loadSelected.run(); });
+
+        JButton addFiles = secondaryButton("Add files…");
+        JButton save = primaryButton("Save");
+        JButton snapshot = secondaryButton("Save version");
+        JButton restore = secondaryButton("Restore saved version");
+        JButton openFolder = secondaryButton("Open containing folder");
+        addFiles.addActionListener(event -> {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setMultiSelectionEnabled(true);
+            if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+            for (File file : chooser.getSelectedFiles()) if (!files.contains(file.toPath())) files.addElement(file.toPath());
+            if (!files.isEmpty() && fileList.getSelectedIndex() < 0) fileList.setSelectedIndex(0);
+        });
+        save.addActionListener(event -> {
+            if (activeFile[0] == null) return;
+            try {
+                Files.writeString(activeFile[0], projectEditor.getText(), StandardCharsets.UTF_8);
+                savedCopy[0] = projectEditor.getText();
+                pathLabel.setText(activeFile[0].toAbsolutePath() + " · saved");
+            } catch (IOException exception) {
+                JOptionPane.showMessageDialog(dialog, exception.getMessage(), "Could not save file", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        snapshot.addActionListener(event -> {
+            if (activeFile[0] == null) return;
+            String id = accountId(activeFile[0].toAbsolutePath().toString());
+            putChunked("project.version.v1." + id + ".", projectEditor.getText());
+            prefs.putLong("project.version.time.v1." + id, System.currentTimeMillis());
+            JOptionPane.showMessageDialog(dialog, "A restorable version was saved.", "Version saved", JOptionPane.INFORMATION_MESSAGE);
+        });
+        restore.addActionListener(event -> {
+            if (activeFile[0] == null) return;
+            String id = accountId(activeFile[0].toAbsolutePath().toString());
+            String version = getChunked("project.version.v1." + id + ".");
+            if (version.isEmpty()) JOptionPane.showMessageDialog(dialog, "No saved version exists for this file.");
+            else projectEditor.setText(version);
+        });
+        openFolder.addActionListener(event -> {
+            if (activeFile[0] == null || !Desktop.isDesktopSupported()) return;
+            try { Desktop.getDesktop().open(activeFile[0].toAbsolutePath().getParent().toFile()); }
+            catch (IOException exception) { JOptionPane.showMessageDialog(dialog, exception.getMessage(), "Could not open folder", JOptionPane.ERROR_MESSAGE); }
+        });
+
+        JPanel left = new JPanel(new BorderLayout(0, 8));
+        left.setBorder(new EmptyBorder(12, 12, 12, 6));
+        left.add(addFiles, BorderLayout.NORTH);
+        left.add(new JScrollPane(fileList), BorderLayout.CENTER);
+        JPanel editorCard = new JPanel(new BorderLayout());
+        editorCard.setBorder(new EmptyBorder(12, 6, 12, 12));
+        editorCard.add(pathLabel, BorderLayout.NORTH);
+        editorCard.add(new JScrollPane(projectEditor), BorderLayout.CENTER);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        actions.add(openFolder); actions.add(restore); actions.add(snapshot); actions.add(save);
+        editorCard.add(actions, BorderLayout.SOUTH);
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, editorCard);
+        split.setDividerLocation(250);
+        dialog.setContentPane(split);
+        dialog.setVisible(true);
+    }
+
+    private void showCommunityDialog() {
+        JDialog dialog = new JDialog(frame, "Desktopcraft Community Apps", true);
+        dialog.setIconImages(buildAppIcons());
+        dialog.setSize(900, 650);
+        dialog.setLocationRelativeTo(frame);
+        JTextField server = new JTextField(prefs.get("server.url", "http://localhost:8000"), 28);
+        DefaultListModel<CommunityApp> apps = new DefaultListModel<>();
+        JList<CommunityApp> list = new JList<>(apps);
+        JTextArea details = new JTextArea("Connect to the Desktopcraft server to browse free source and installable Debian packages.");
+        details.setEditable(false);
+        details.setLineWrap(true);
+        details.setWrapStyleWord(true);
+        list.addListSelectionListener(event -> {
+            CommunityApp app = list.getSelectedValue();
+            if (app != null) details.setText(app.title + "\n\n" + app.description + "\n\nBy @" + app.creator + "\nDownload: " + app.fileName);
+        });
+        Runnable refresh = () -> {
+            prefs.put("server.url", server.getText().trim());
+            details.setText("Loading community apps…");
+            new SwingWorker<List<CommunityApp>, Void>() {
+                protected List<CommunityApp> doInBackground() throws Exception { return loadCommunityApps(server.getText().trim()); }
+                protected void done() {
+                    try {
+                        apps.clear();
+                        for (CommunityApp app : get()) apps.addElement(app);
+                        details.setText(apps.isEmpty() ? "No community apps have been published yet." : "Choose an app to see its details.");
+                    } catch (Exception exception) { details.setText("Could not load the community library. Start the site server with npm start.\n\n" + exception.getMessage()); }
+                }
+            }.execute();
+        };
+        JButton refreshButton = secondaryButton("Refresh");
+        JButton download = primaryButton("Download selected");
+        JButton publish = secondaryButton("Publish an app");
+        refreshButton.addActionListener(event -> refresh.run());
+        download.addActionListener(event -> {
+            CommunityApp app = list.getSelectedValue();
+            if (app != null) openWebPage(server.getText().trim().replaceAll("/+$", "") + "/api/apps/" + app.id + "/download");
+        });
+        publish.addActionListener(event -> openWebPage(server.getText().trim().replaceAll("/+$", "") + "/make.html"));
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        top.add(new JLabel("Server")); top.add(server); top.add(refreshButton); top.add(publish);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT)); actions.add(download);
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, new JScrollPane(list), new JScrollPane(details));
+        split.setDividerLocation(330);
+        JPanel root = new JPanel(new BorderLayout(8, 8));
+        root.setBorder(new EmptyBorder(10, 10, 10, 10));
+        root.add(top, BorderLayout.NORTH); root.add(split, BorderLayout.CENTER); root.add(actions, BorderLayout.SOUTH);
+        dialog.setContentPane(root);
+        refresh.run();
+        dialog.setVisible(true);
+    }
+
+    private List<CommunityApp> loadCommunityApps(String server) throws Exception {
+        String base = server.replaceAll("/+$", "");
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+            HttpRequest.newBuilder(URI.create(base + "/api/apps")).GET().build(), HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) throw new IOException("Server returned " + response.statusCode());
+        List<CommunityApp> apps = new ArrayList<>();
+        Pattern item = Pattern.compile("\\{\"id\":(\\d+),\"title\":\"((?:\\\\.|[^\"])*)\",\"description\":\"((?:\\\\.|[^\"])*)\",\"toolkit\":\"[^\"]+\",\"toolkitLabel\":\"[^\"]+\",\"fileName\":\"((?:\\\\.|[^\"])*)\".*?\"username\":\"((?:\\\\.|[^\"])*)\"", Pattern.DOTALL);
+        Matcher matcher = item.matcher(response.body());
+        while (matcher.find()) apps.add(new CommunityApp(Long.parseLong(matcher.group(1)), unescapeJson(matcher.group(2)), unescapeJson(matcher.group(3)), unescapeJson(matcher.group(4)), unescapeJson(matcher.group(5))));
+        return apps;
+    }
+
+    private void showFeedbackDialog() {
+        JTextField name = new JTextField(currentUsername.isBlank() ? "" : currentUserName, 28);
+        JTextField email = new JTextField(28);
+        JTextArea message = new JTextArea(8, 34);
+        message.setLineWrap(true); message.setWrapStyleWord(true);
+        JPanel form = new JPanel(); form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+        form.add(new JLabel("Name (optional)")); form.add(name); form.add(Box.createVerticalStrut(8));
+        form.add(new JLabel("Reply email (optional)")); form.add(email); form.add(Box.createVerticalStrut(8));
+        form.add(new JLabel("Feedback")); form.add(new JScrollPane(message));
+        if (JOptionPane.showConfirmDialog(frame, form, "Send Desktopcraft feedback", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return;
+        if (message.getText().trim().length() < 2) { JOptionPane.showMessageDialog(frame, "Write a feedback message first."); return; }
+        String base = prefs.get("server.url", "http://localhost:8000").replaceAll("/+$", "");
+        String payload = "{\"name\":\"" + jsonString(name.getText()) + "\",\"email\":\"" + jsonString(email.getText()) + "\",\"message\":\"" + jsonString(message.getText()) + "\",\"website\":\"\"}";
+        new SwingWorker<Integer, Void>() {
+            protected Integer doInBackground() throws Exception {
+                return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(base + "/api/feedback")).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(payload)).build(), HttpResponse.BodyHandlers.ofString()).statusCode();
+            }
+            protected void done() {
+                try { JOptionPane.showMessageDialog(frame, get() < 300 ? "Feedback sent. Thank you." : "The server could not accept feedback."); }
+                catch (Exception exception) { JOptionPane.showMessageDialog(frame, "Could not connect to the feedback server: " + exception.getMessage()); }
+            }
+        }.execute();
+    }
+
+    private void showAboutDialog() {
+        JOptionPane.showMessageDialog(frame,
+            "<html><div style='width:420px'><h1>Desktopcraft</h1><p>Learn desktop development through 2,500 lessons, projects, tutorials, quizzes, community apps, and native building tools.</p><p>Five tracks: Java Swing, Python Tkinter, C# WinForms, C++ Qt Widgets, and JavaScript Electron.</p></div></html>",
+            "About Desktopcraft", JOptionPane.INFORMATION_MESSAGE, new ImageIcon(buildAppIcon(64)));
+    }
+
+    private void openWebPage(String address) {
+        if (!Desktop.isDesktopSupported()) { JOptionPane.showMessageDialog(frame, address, "Open this address", JOptionPane.INFORMATION_MESSAGE); return; }
+        try { Desktop.getDesktop().browse(URI.create(address)); }
+        catch (Exception exception) { JOptionPane.showMessageDialog(frame, exception.getMessage(), "Could not open page", JOptionPane.ERROR_MESSAGE); }
+    }
+
+    private static String jsonString(String value) {
+        return String.valueOf(value).replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "\\r").replace("\n", "\\n");
+    }
+
+    private static String unescapeJson(String value) {
+        return value.replace("\\n", "\n").replace("\\r", "\r").replace("\\\"", "\"").replace("\\\\", "\\");
     }
 
     private void showAppMakerDialog() {
@@ -2405,6 +2632,9 @@ public class DesktopcraftApp {
     private record QuizQuestion(String question, List<String> options, int answer, String explanation) {}
     private record LessonRef(int index, Lesson lesson) { public String toString() { return lesson.title; } }
     private record Builder(String name, String username, String focus, int xp) {}
+    private record CommunityApp(long id, String title, String description, String fileName, String creator) {
+        public String toString() { return title + "  ·  @" + creator; }
+    }
     private record ForumReply(String authorName, String authorUsername, String body, long createdAt) {}
     private record ForumTopic(long id, String title, String category, String body, String code, String authorName, String authorUsername, Set<String> likedBy, List<ForumReply> replies) {
         public String toString() { return title + "  ·  " + category + "  ·  " + likedBy.size() + " likes"; }

@@ -1,6 +1,8 @@
 # Desktopcraft Swing edition
 
-The downloadable desktop tutor is a self-contained Java Swing application with the website's complete learning feature set. It includes five courses and 2,500 lessons, editable code, a simulated desktop preview, automatically checked challenges, native 20-question quizzes, the five-language tutorial hub, App Maker, lesson creation, Helper AI's built-in course guide, a real-account forum with posts/replies/likes, customization, persistent progress, XP, and the leaderboard.
+The downloadable desktop tutor is a Java Swing application with the website's complete learning feature set. It includes five courses and 2,500 lessons, editable code, a simulated desktop preview, automatically checked challenges, native 20-question quizzes, the five-language tutorial hub, App Maker, lesson creation, Helper AI's built-in course guide, a real-account forum with posts/replies/likes, customization, persistent progress, XP, and the leaderboard.
+
+The desktop navigation also includes a native project workspace with multi-file editing and restorable versions, the shared community app/package library, publishing access, feedback submission, and About. Community apps, publishing, and feedback connect to the same database-backed site server configured in the Community Apps window (by default `http://localhost:8000`). Local lessons, projects, accounts, preferences, and progress continue working when that server is offline.
 
 Account creation and sign-in use a Desktopcraft username and a separate Desktopcraft-only password—never an email password. Accounts stay registered through the operating system's Java Preferences storage, sessions reopen automatically, and passwords use salted PBKDF2-SHA256 verifiers. The app does not create account files or store readable passwords.
 
